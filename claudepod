@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# claudepod: Launch Claude Code in a sandboxed Podman container
+#
+# Usage:
+#   claudepod [options] [project-dir] [-- claude-args...]
+#
+# Options:
+#   -b, --build       Force rebuild the container image (clean, no layer cache)
+#   -n, --no-firewall Skip firewall setup (faster start, less secure)
+#   -p, --prompt TEXT  Pass a prompt directly (non-interactive, for background tasks)
+#   -s, --shell       Drop into a shell instead of launching Claude Code
+#   -h, --help        Show this help
+#
+# Examples:
+#   claudepod                          # Current dir, interactive
+#   claudepod ~/projects/myapp         # Specific project
+#   claudepod -p "fix all lint errors" # Non-interactive task
+#   claudepod -- --model opus          # Pass args to claude
+# =============================================================================
+
+IMAGE_NAME="claudepod"
+CONTAINER_PREFIX="claudepod"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Container user config (must match Dockerfile ARG defaults)
+CONTAINER_USER="dev"
+CONTAINER_HOME="/home/${CONTAINER_USER}"
+
+# Defaults
+FORCE_BUILD=false
+USE_FIREWALL=true
+CLAUDE_PROMPT=""
+SHELL_ONLY=false
+PROJECT_DIR=""
+CLAUDE_EXTRA_ARGS=()
+CLAUDE_EXTRA_ARGS_COUNT=0
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  -b | --build)
+    FORCE_BUILD=true
+    shift
+    ;;
+  -n | --no-firewall)
+    USE_FIREWALL=false
+    shift
+    ;;
+  -s | --shell)
+    SHELL_ONLY=true
+    shift
+    ;;
+  -p | --prompt)
+    if [[ $# -lt 2 ]]; then
+      echo "Error: $1 requires an argument" >&2
+      exit 1
+    fi
+    CLAUDE_PROMPT="$2"
+    shift 2
+    ;;
+  -h | --help)
+    head -22 "$0" | grep '^#' | sed 's/^# \?//'
+    exit 0
+    ;;
+  --)
+    shift
+    CLAUDE_EXTRA_ARGS=("$@")
+    CLAUDE_EXTRA_ARGS_COUNT=$#
+    break
+    ;;
+  -*)
+    echo "Unknown option: $1" >&2
+    exit 1
+    ;;
+  *)
+    PROJECT_DIR="$1"
+    shift
+    ;;
+  esac
+done
+
+# Resolve project directory
+PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+
+# Sanitize project name for container naming (alphanumeric, hyphens, underscores only)
+SAFE_PROJECT_NAME="$(echo "$PROJECT_NAME" | tr -cd '[:alnum:]-_')"
+CONTAINER_NAME="${CONTAINER_PREFIX}-${SAFE_PROJECT_NAME:-project}-$$"
+
+echo "=== Claude Sandbox ==="
+echo "  Project:   $PROJECT_DIR"
+echo "  Container: $CONTAINER_NAME"
+echo "  Firewall:  $USE_FIREWALL"
+echo ""
+
+# ----- Build image if needed -----
+VOLUME_NAME="claudepod-home"
+
+image_exists() {
+  podman image exists "$IMAGE_NAME" 2>/dev/null
+}
+
+if $FORCE_BUILD || ! image_exists; then
+  echo "[build] Building $IMAGE_NAME image..."
+  podman build --format docker \
+    --no-cache \
+    --build-arg USER_UID="$(id -u)" \
+    --build-arg USER_GID="$(id -g)" \
+    -t "$IMAGE_NAME" \
+    "$SCRIPT_DIR"
+  echo "[build] Done."
+else
+  echo "[build] Image $IMAGE_NAME exists. Use -b to rebuild."
+fi
+
+# ----- Ensure home volume matches current image -----
+CURRENT_IMAGE_ID=$(podman image inspect --format '{{.Id}}' "$IMAGE_NAME" 2>/dev/null || echo "")
+
+if podman volume exists "$VOLUME_NAME" 2>/dev/null; then
+  STORED_IMAGE_ID=$(podman volume inspect --format '{{index .Labels "image-id"}}' "$VOLUME_NAME" 2>/dev/null || echo "")
+  if [ "$STORED_IMAGE_ID" != "$CURRENT_IMAGE_ID" ]; then
+    echo "[volume] Image changed — removing stale home volume... $VOLUME_NAME"
+    podman volume rm "$VOLUME_NAME" 2>/dev/null
+  fi
+fi
+
+if ! podman volume exists "$VOLUME_NAME" 2>/dev/null; then
+  echo "[volume] Creating home volume for current image... $VOLUME_NAME"
+  podman volume create --label "image-id=$CURRENT_IMAGE_ID" "$VOLUME_NAME" 2>/dev/null
+fi
+
+# ----- Construct mount arguments -----
+MOUNTS=(
+  # Project workspace (read-write, this is what Claude edits)
+  "-v" "${PROJECT_DIR}:/workspace:Z"
+
+  # Persist the entire container home directory across sessions
+  # Covers ~/.claude.json, ~/.claude/, ~/.bashrc modifications, shell history, etc.
+  "-v" "${VOLUME_NAME}:${CONTAINER_HOME}:Z"
+)
+
+# Mount SSH keys read-only (for git push/pull)
+if [ -d "$HOME/.ssh" ]; then
+  MOUNTS+=("-v" "${HOME}/.ssh:${CONTAINER_HOME}/.ssh:ro,Z")
+fi
+
+# Mount gitconfig read-only
+if [ -f "$HOME/.gitconfig" ]; then
+  MOUNTS+=("-v" "${HOME}/.gitconfig:${CONTAINER_HOME}/.gitconfig:ro,Z")
+fi
+
+# ----- Construct run arguments -----
+RUN_ARGS=(
+  "--rm"
+  "--name" "$CONTAINER_NAME"
+  "-it"
+  "--userns=keep-id"
+)
+
+# Firewall requires NET_ADMIN + NET_RAW capabilities
+if $USE_FIREWALL; then
+  RUN_ARGS+=("--cap-add=NET_ADMIN" "--cap-add=NET_RAW")
+fi
+
+# ----- Detect project version files for mise -----
+VERSION_FILES=(.tool-versions .node-version .python-version .ruby-version .go-version .java-version mise.toml .mise.toml)
+HAS_VERSION_FILE=false
+for vf in "${VERSION_FILES[@]}"; do
+  if [ -f "$PROJECT_DIR/$vf" ]; then
+    HAS_VERSION_FILE=true
+    echo "[mise] Detected $vf — runtimes will be installed at startup."
+    break
+  fi
+done
+
+MISE_HINT="This environment uses Mise for language runtime management."
+
+# ----- Construct the entrypoint command -----
+# We build a bash -c script that references $1, $2, ... for variable values,
+# then pass the actual values as positional arguments. This avoids all shell
+# escaping issues with prompts, extra args, and system prompt text.
+ENTRYPOINT_SCRIPT=""
+ENTRYPOINT_ARGS=("_") # $0 placeholder for bash -c
+ARG_INDEX=1
+
+# Initialize firewall if enabled
+if $USE_FIREWALL; then
+  ENTRYPOINT_SCRIPT+="sudo /usr/local/bin/init-firewall.sh && "
+fi
+
+# Install mise runtimes if version file detected
+if $HAS_VERSION_FILE; then
+  ENTRYPOINT_SCRIPT+="cd /workspace && mise install && "
+fi
+
+if $SHELL_ONLY; then
+  ENTRYPOINT_SCRIPT+="bash"
+else
+  # Build the claude command
+  ENTRYPOINT_SCRIPT+="claude --dangerously-skip-permissions"
+
+  # If no version file, hint Claude about mise availability
+  if ! $HAS_VERSION_FILE; then
+    ENTRYPOINT_SCRIPT+=" --append-system-prompt \"\$${ARG_INDEX}\""
+    ENTRYPOINT_ARGS+=("$MISE_HINT")
+    ((ARG_INDEX++))
+  fi
+
+  # Append any extra args passed after --
+  if [ "$CLAUDE_EXTRA_ARGS_COUNT" -gt 0 ]; then
+    for arg in "${CLAUDE_EXTRA_ARGS[@]}"; do
+      ENTRYPOINT_SCRIPT+=" \"\$${ARG_INDEX}\""
+      ENTRYPOINT_ARGS+=("$arg")
+      ((ARG_INDEX++))
+    done
+  fi
+
+  # If prompt is provided, run non-interactively
+  if [ -n "$CLAUDE_PROMPT" ]; then
+    ENTRYPOINT_SCRIPT+=" -p \"\$${ARG_INDEX}\""
+    ENTRYPOINT_ARGS+=("$CLAUDE_PROMPT")
+    ((ARG_INDEX++))
+  fi
+fi
+
+# ----- Launch -----
+if $SHELL_ONLY; then
+  echo "[run] Starting sandboxed shell..."
+else
+  echo "[run] Starting sandboxed Claude Code..."
+fi
+
+podman run \
+  "${RUN_ARGS[@]}" \
+  "${MOUNTS[@]}" \
+  "$IMAGE_NAME" \
+  bash -c "$ENTRYPOINT_SCRIPT" "${ENTRYPOINT_ARGS[@]}"
+
+echo "."
+echo ".."
+echo "..."
+echo "[done] Container destroyed. Your project files in $PROJECT_DIR are intact."

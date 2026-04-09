@@ -1,0 +1,50 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+`claudepod` is a tool that runs Claude Code inside a sandboxed Podman container with an egress firewall. It provides network-restricted, disposable environments for running Claude Code against local project directories.
+
+## Key Files
+
+- `claudepod` — Bash entrypoint script. Builds the container image (if needed), mounts the user's project into `/workspace`, optionally sets up the firewall, and launches Claude Code with `--dangerously-skip-permissions`.
+- `Dockerfile` — Debian trixie-slim based image with dev tools, Claude Code (native installer), mise (runtime version manager), and Ralph. Runs as non-root user `dev` with UID/GID passed as build args (defaults to 1000).
+- `init-firewall.sh` — iptables/ipset-based default-deny egress firewall. Allowlists specific domains (Anthropic API, GitHub, Bitbucket, npm, PyPI, Go proxy, crates.io, Hex.pm, documentation sites). DNS is locked to the container's configured resolver. SSH is restricted to GitHub and Bitbucket IPs only.
+- `README.md` — User-facing documentation with features, usage, and firewall allowlist summary.
+- `.gitignore` — Excludes editor swap files, OS files, and `.claude/` local state.
+
+## Building and Running
+
+```bash
+# Run against current directory (builds image on first run)
+./claudepod
+
+# Force rebuild the image (clean, no layer cache)
+./claudepod -b
+
+# Run against a specific project
+./claudepod ~/projects/myapp
+
+# Non-interactive with a prompt
+./claudepod -p "fix all lint errors"
+
+# Skip firewall (faster start)
+./claudepod -n
+
+# Drop into a shell instead of launching Claude
+./claudepod -s
+
+# Pass extra args to claude
+./claudepod -- --model opus
+```
+
+## Architecture Notes
+
+- The container uses `podman run --userns=keep-id` to map the host user's UID/GID into the container, so file ownership in mounted project dirs is preserved. The Dockerfile accepts `USER_UID` and `USER_GID` as build args, set automatically by `claudepod` to match the host user.
+- Host `~/.ssh` and `~/.gitconfig` are mounted read-only into the container for git operations.
+- A named volume `claudepod-home` persists the container user's home directory (Claude config, shell history, etc.) across sessions. The volume is automatically removed on image rebuild so it gets re-populated from the fresh image.
+- The firewall requires `NET_ADMIN` and `NET_RAW` capabilities and runs via a sudoers rule limited to the firewall script only.
+- The firewall resolves domain allowlist entries to IPs at container start using `dig`, fetches GitHub's IP ranges from `api.github.com/meta`, and fetches Bitbucket's IP ranges from `ip-ranges.atlassian.com` for SSH restrictions.
+- mise is pre-installed with Node.js 22 LTS and Python 3.13 globally. If the project directory contains a version file (`.tool-versions`, `mise.toml`, `.node-version`, etc.), runtimes are installed automatically at container start. Otherwise, Claude is given a system prompt hint about mise availability.
+- Ralph (claudepod helper) is installed from `frankbria/ralph-claude-code` during the image build.
