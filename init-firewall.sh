@@ -43,6 +43,13 @@ ALLOWED_DOMAINS=(
   "o4509685579005952.ingest.us.sentry.io"
 )
 
+# AI APIs
+ALLOWED_DOMAINS+=(
+  "api.elevenlabs.io"
+  "api.deepgram.com"
+  "generativelanguage.googleapis.com"
+)
+
 # GitHub (for git operations over HTTPS + WebFetch reading repos/docs)
 ALLOWED_DOMAINS+=(
   "github.com"
