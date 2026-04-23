@@ -9,6 +9,7 @@ Run [Claude Code](https://claude.ai/code) inside a sandboxed Podman container wi
 - **DNS pinned to container resolver** — prevents DNS tunneling
 - **File ownership preserved** — uses `podman --userns=keep-id` so mounted files keep your host UID/GID
 - **Same-path mounting** — your project sits at the same absolute path inside the container as on the host, so git worktrees, submodules, and other absolute-path config survive crossing the boundary
+- **Per-project memory + opt-in session resume** — sessions, memory, plans, and todos are stored in `<project>/.claudepod/` (auto-gitignored), so projects can't see each other's state; pass `-r <session-id>` to resume a specific previous session
 - **Persistent home directory** — Claude config, shell history, and installed tools survive across sessions
 - **Runtime version management** — [mise](https://mise.jdx.dev/) is pre-installed; detects `.tool-versions`, `mise.toml`, etc. and installs runtimes automatically
 
@@ -40,6 +41,7 @@ claudepod [options] [project-dir] [-- claude-args...]
 | `-n`, `--no-firewall` | Skip firewall setup (faster start, less secure) |
 | `-p`, `--prompt TEXT` | Run non-interactively with a prompt |
 | `-s`, `--shell` | Drop into a bash shell instead of launching Claude |
+| `-r`, `--resume ID` | Resume a specific previous Claude session by its session ID |
 | `-h`, `--help` | Show help |
 
 ### Examples
@@ -62,15 +64,19 @@ claudepod [options] [project-dir] [-- claude-args...]
 
 # Debug: drop into a shell inside the container
 ./claudepod -s
+
+# Resume a specific previous session by its ID
+./claudepod -r 01999c8a-b3f4-7c2d-9e8f-1a2b3c4d5e6f
 ```
 
 ## How it works
 
 1. **Builds** a Debian trixie-slim container with dev tools, Claude Code, and mise
 2. **Mounts** your project directory at the same absolute path inside the container as on the host (read-write), so absolute paths in git config resolve identically on both sides
-3. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
-4. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
-5. **Launches Claude Code** with `--dangerously-skip-permissions` (safe because the container *is* the sandbox)
+3. **Creates** `<project>/.claudepod/` for per-project Claude state (sessions, memory, plans, todos) and bind-mounts it onto Claude's per-cwd state path; appends `.claudepod/` to `.gitignore` if a `.gitignore` exists
+4. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
+5. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
+6. **Launches Claude Code** with `--dangerously-skip-permissions` (safe because the container *is* the sandbox). Starts a fresh Claude session by default — pass `-r <session-id>` to resume a specific previous session.
 
 > **Security note:** Claude Code runs with `--dangerously-skip-permissions` and has SSH access via your forwarded SSH agent. This means Claude can push to any repository your loaded SSH keys have access to. If this is a concern, remove keys from your agent or use a separate agent with a limited key set.
 

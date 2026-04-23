@@ -35,6 +35,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Drop into a shell instead of launching Claude
 ./claudepod -s
 
+# Resume a specific previous Claude session by its ID
+./claudepod -r 01999c8a-b3f4-7c2d-9e8f-1a2b3c4d5e6f
+
 # Pass extra args to claude
 ./claudepod -- --model opus
 ```
@@ -45,6 +48,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The project is mounted at its **real host absolute path** inside the container (e.g., `/home/jaime/projects/foo` on the host is `/home/jaime/projects/foo` in the container) and `--workdir` is set to that same path. This avoids translation issues with anything git records as an absolute path: git worktree pointers, submodules, and `core.worktree` resolve identically on both sides. The `/workspace` directory still exists in the image but is no longer the project mount target. Project paths under `/home/dev/` are refused at launch because they would collide with the container user's home volume.
 - Host `~/.gitconfig` is mounted read-only. For SSH, the host's `SSH_AUTH_SOCK` is forwarded into the container along with read-only mounts of `~/.ssh/config`, `~/.ssh/known_hosts`, and public keys; private keys are never mounted — git relies entirely on the forwarded agent.
 - A named volume `claudepod-home` persists the container user's home directory (Claude config, shell history, etc.) across sessions. The volume is automatically removed on image rebuild so it gets re-populated from the fresh image.
+- Per-project Claude state (sessions, memory, plans, todos, checkpoints) lives in `<project>/.claudepod/` on the host. `claudepod` creates the dir on launch, appends `.claudepod/` to the project's `.gitignore` if one exists, and bind-mounts it onto Claude Code's per-cwd state path inside the container (`~/.claude/projects/<escaped-host-path>/`, where `/` becomes `-`). Claude is unaware of the redirection — it writes to its conventional location, but the bytes land in the project's own state dir. This gives memory isolation per host project for free, and persists session JSONL files so they're available to `-r/--resume <session-id>` on later runs. Resume is **not** automatic by default — running multiple claudepods concurrently in the same project would otherwise both latch onto the most recent session and stomp each other's appends. Pick the session ID explicitly to opt in.
 - The firewall requires `NET_ADMIN` and `NET_RAW` capabilities and runs via a sudoers rule limited to the firewall script only.
 - The firewall resolves domain allowlist entries to IPs at container start using `dig`, fetches GitHub's IP ranges from `api.github.com/meta`, and fetches Bitbucket's IP ranges from `ip-ranges.atlassian.com` for SSH restrictions.
 - mise is pre-installed with Node.js 22 LTS and Python 3.13 globally. If the project directory contains a version file (`.tool-versions`, `mise.toml`, `.node-version`, etc.), runtimes are installed automatically at container start. Otherwise, Claude is given a system prompt hint about mise availability.

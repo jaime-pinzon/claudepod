@@ -9,3 +9,6 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# claudepod sandbox state
+.claudepod/

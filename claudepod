@@ -12,6 +12,7 @@ set -euo pipefail
 #   -n, --no-firewall Skip firewall setup (faster start, less secure)
 #   -p, --prompt TEXT  Pass a prompt directly (non-interactive, for background tasks)
 #   -s, --shell       Drop into a shell instead of launching Claude Code
+#   -r, --resume ID   Resume a specific Claude session by its session ID
 #   -h, --help        Show this help
 #
 # Examples:
@@ -34,6 +35,7 @@ FORCE_BUILD=false
 USE_FIREWALL=true
 CLAUDE_PROMPT=""
 SHELL_ONLY=false
+RESUME_SESSION_ID=""
 PROJECT_DIR=""
 CLAUDE_EXTRA_ARGS=()
 CLAUDE_EXTRA_ARGS_COUNT=0
@@ -53,6 +55,14 @@ while [[ $# -gt 0 ]]; do
     SHELL_ONLY=true
     shift
     ;;
+  -r | --resume)
+    if [[ $# -lt 2 ]]; then
+      echo "Error: $1 requires a session ID argument" >&2
+      exit 1
+    fi
+    RESUME_SESSION_ID="$2"
+    shift 2
+    ;;
   -p | --prompt)
     if [[ $# -lt 2 ]]; then
       echo "Error: $1 requires an argument" >&2
@@ -62,7 +72,7 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   -h | --help)
-    head -22 "$0" | grep '^#' | sed 's/^# \?//'
+    head -23 "$0" | grep '^#' | sed 's/^# \?//'
     exit 0
     ;;
   --)
@@ -100,8 +110,16 @@ fi
 SAFE_PROJECT_NAME="$(echo "$PROJECT_NAME" | tr -cd '[:alnum:]-_')"
 CONTAINER_NAME="${CONTAINER_PREFIX}-${SAFE_PROJECT_NAME:-project}-$$"
 
+# Per-project Claude state lives in <project>/.claudepod/ on the host and is
+# bind-mounted onto the in-container path Claude Code uses for per-project
+# state (~/.claude/projects/<escaped-cwd>/, where slashes become dashes).
+PROJECT_STATE_DIR="${PROJECT_DIR}/.claudepod"
+ESCAPED_CWD="${PROJECT_DIR//\//-}"
+CONTAINER_STATE_DIR="${CONTAINER_HOME}/.claude/projects/${ESCAPED_CWD}"
+
 echo "=== Claude Sandbox ==="
 echo "  Project:   $PROJECT_DIR (mounted at same path inside container)"
+echo "  State:     $PROJECT_STATE_DIR"
 echo "  Container: $CONTAINER_NAME"
 echo "  Firewall:  $USE_FIREWALL"
 echo ""
@@ -142,6 +160,18 @@ if ! podman volume exists "$VOLUME_NAME" 2>/dev/null; then
   podman volume create --label "image-id=$CURRENT_IMAGE_ID" "$VOLUME_NAME" 2>/dev/null
 fi
 
+# ----- Ensure per-project state dir exists and is gitignored -----
+if [ ! -d "$PROJECT_STATE_DIR" ]; then
+  mkdir -p "$PROJECT_STATE_DIR"
+  echo "[state] Created $PROJECT_STATE_DIR"
+fi
+
+GITIGNORE="${PROJECT_DIR}/.gitignore"
+if [ -f "$GITIGNORE" ] && ! grep -qxF '.claudepod/' "$GITIGNORE"; then
+  printf '\n# claudepod sandbox state\n.claudepod/\n' >> "$GITIGNORE"
+  echo "[gitignore] Appended .claudepod/ to $GITIGNORE"
+fi
+
 # ----- Construct run arguments -----
 RUN_ARGS=(
   "--rm"
@@ -161,6 +191,11 @@ MOUNTS=(
   # Persist the entire container home directory across sessions
   # Covers ~/.claude.json, ~/.claude/, ~/.bashrc modifications, shell history, etc.
   "-v" "${VOLUME_NAME}:${CONTAINER_HOME}:Z"
+
+  # Per-project Claude state (sessions + memory + plans + todos), bind-mounted
+  # onto the path Claude Code uses for per-cwd state. Sub-mount on top of the
+  # home volume — podman handles the layering.
+  "-v" "${PROJECT_STATE_DIR}:${CONTAINER_STATE_DIR}:Z"
 )
 
 # Forward the host's SSH agent instead of mounting private keys. Private keys
@@ -241,8 +276,16 @@ fi
 if $SHELL_ONLY; then
   ENTRYPOINT_SCRIPT+="bash"
 else
-  # Build the claude command
+  # Build the claude command. Default is a fresh session; pass -r/--resume <id>
+  # to resume a specific previous session by its ID. Resume is not automatic
+  # because concurrent claudepods in the same project would otherwise both
+  # latch onto the most recent session and stomp each other's appends.
   ENTRYPOINT_SCRIPT+="claude --dangerously-skip-permissions"
+  if [ -n "$RESUME_SESSION_ID" ]; then
+    ENTRYPOINT_SCRIPT+=" -r \"\$${ARG_INDEX}\""
+    ENTRYPOINT_ARGS+=("$RESUME_SESSION_ID")
+    ((ARG_INDEX++))
+  fi
 
   # If no version file, hint Claude about mise availability
   if ! $HAS_VERSION_FILE; then
