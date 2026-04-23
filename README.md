@@ -80,7 +80,7 @@ claudepod [options] [project-dir] [-- claude-args...]
 3. **Creates** `<project>/.claudepod/` for per-project Claude state (sessions, memory, plans, todos) and bind-mounts it onto Claude's per-cwd state path; appends `.claudepod/` to `.gitignore` if a `.gitignore` exists
 4. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
 5. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
-6. **Launches Claude Code** with `--dangerously-skip-permissions` by default (safe because the container *is* the sandbox and unattended runs can't answer prompts). Starts a fresh session — pass `-r <session-id>` to resume a specific previous one, or `-i/--interactive` to keep Claude's normal permission prompts when you're present.
+6. **Launches Claude Code** inside a tiny PTY proxy (`nosusp`) that drops the `0x1A` (Ctrl+Z) byte from stdin before it reaches Claude, so a stray Ctrl+Z can't self-suspend the session. Uses `--dangerously-skip-permissions` by default (safe because the container *is* the sandbox and unattended runs can't answer prompts). Starts a fresh session — pass `-r <session-id>` to resume a specific previous one, or `-i/--interactive` to keep Claude's normal permission prompts when you're present.
 
 > **Security note:** By default Claude Code runs with `--dangerously-skip-permissions` and has SSH access via your forwarded SSH agent. This means Claude can push to any repository your loaded SSH keys have access to. If this is a concern, run with `-i` so you can review actions, remove keys from your agent, or use a separate agent with a limited key set.
 

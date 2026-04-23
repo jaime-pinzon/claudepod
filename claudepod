@@ -282,14 +282,20 @@ fi
 if $SHELL_ONLY; then
   ENTRYPOINT_SCRIPT+="bash"
 else
-  # Build the claude command. --dangerously-skip-permissions is the default
-  # because the container is the sandbox and unattended runs can't answer
-  # permission prompts. Pass -i/--interactive to keep Claude's normal prompts
-  # when the user is present. Default is a fresh session; pass -r/--resume
-  # <id> to resume a specific previous session by its ID (not automatic,
-  # because concurrent claudepods in the same project would otherwise both
-  # latch onto the most recent session and stomp each other's appends).
-  ENTRYPOINT_SCRIPT+="claude"
+  # Build the claude command. Prefix with `nosusp` (a Python PTY proxy that
+  # runs claude inside a pseudo-terminal and filters 0x1A/Ctrl+Z out of the
+  # stdin byte stream before it reaches claude) so a stray Ctrl+Z can't make
+  # claude self-suspend via SIGTSTP. Shell-only mode bypasses this since a
+  # shell legitimately wants job control.
+  #
+  # --dangerously-skip-permissions is the default because the container is
+  # the sandbox and unattended runs can't answer permission prompts. Pass
+  # -i/--interactive to keep Claude's normal prompts when the user is
+  # present. Default is a fresh session; pass -r/--resume <id> to resume a
+  # specific previous session by its ID (not automatic, because concurrent
+  # claudepods in the same project would otherwise both latch onto the
+  # most recent session and stomp each other's appends).
+  ENTRYPOINT_SCRIPT+="nosusp claude"
   if ! $INTERACTIVE; then
     ENTRYPOINT_SCRIPT+=" --dangerously-skip-permissions"
   fi

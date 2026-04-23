@@ -21,6 +21,7 @@ RUN apt-get update \
         jq \
         openssh-client \
         procps \
+        python3 \
         ripgrep \
         sudo \
         tmux \
@@ -42,6 +43,9 @@ COPY --chmod=755 init-firewall.sh /usr/local/bin/init-firewall.sh
 RUN printf '%s ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh\n' "$USERNAME" \
         > /etc/sudoers.d/"$USERNAME"-firewall \
     && chmod 0440 /etc/sudoers.d/"$USERNAME"-firewall
+
+# ── Ctrl+Z filter (PTY proxy that drops 0x1A from stdin) ────────────
+COPY --chmod=755 nosusp.py /usr/local/bin/nosusp
 
 # ── Environment ─────────────────────────────────────────────────────
 ENV DEVCONTAINER=true \
