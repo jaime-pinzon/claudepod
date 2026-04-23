@@ -13,6 +13,7 @@ set -euo pipefail
 #   -p, --prompt TEXT  Pass a prompt directly (non-interactive, for background tasks)
 #   -s, --shell       Drop into a shell instead of launching Claude Code
 #   -r, --resume ID   Resume a specific Claude session by its session ID
+#   -i, --interactive Keep Claude's permission prompts (you're present to answer)
 #   -h, --help        Show this help
 #
 # Examples:
@@ -36,6 +37,7 @@ USE_FIREWALL=true
 CLAUDE_PROMPT=""
 SHELL_ONLY=false
 RESUME_SESSION_ID=""
+INTERACTIVE=false
 PROJECT_DIR=""
 CLAUDE_EXTRA_ARGS=()
 CLAUDE_EXTRA_ARGS_COUNT=0
@@ -62,6 +64,10 @@ while [[ $# -gt 0 ]]; do
     fi
     RESUME_SESSION_ID="$2"
     shift 2
+    ;;
+  -i | --interactive)
+    INTERACTIVE=true
+    shift
     ;;
   -p | --prompt)
     if [[ $# -lt 2 ]]; then
@@ -276,11 +282,17 @@ fi
 if $SHELL_ONLY; then
   ENTRYPOINT_SCRIPT+="bash"
 else
-  # Build the claude command. Default is a fresh session; pass -r/--resume <id>
-  # to resume a specific previous session by its ID. Resume is not automatic
+  # Build the claude command. --dangerously-skip-permissions is the default
+  # because the container is the sandbox and unattended runs can't answer
+  # permission prompts. Pass -i/--interactive to keep Claude's normal prompts
+  # when the user is present. Default is a fresh session; pass -r/--resume
+  # <id> to resume a specific previous session by its ID (not automatic,
   # because concurrent claudepods in the same project would otherwise both
-  # latch onto the most recent session and stomp each other's appends.
-  ENTRYPOINT_SCRIPT+="claude --dangerously-skip-permissions"
+  # latch onto the most recent session and stomp each other's appends).
+  ENTRYPOINT_SCRIPT+="claude"
+  if ! $INTERACTIVE; then
+    ENTRYPOINT_SCRIPT+=" --dangerously-skip-permissions"
+  fi
   if [ -n "$RESUME_SESSION_ID" ]; then
     ENTRYPOINT_SCRIPT+=" -r \"\$${ARG_INDEX}\""
     ENTRYPOINT_ARGS+=("$RESUME_SESSION_ID")

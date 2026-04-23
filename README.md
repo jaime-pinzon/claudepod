@@ -42,6 +42,7 @@ claudepod [options] [project-dir] [-- claude-args...]
 | `-p`, `--prompt TEXT` | Run non-interactively with a prompt |
 | `-s`, `--shell` | Drop into a bash shell instead of launching Claude |
 | `-r`, `--resume ID` | Resume a specific previous Claude session by its session ID |
+| `-i`, `--interactive` | Keep Claude's permission prompts (you're present to answer); without this, runs with `--dangerously-skip-permissions` for unattended use |
 | `-h`, `--help` | Show help |
 
 ### Examples
@@ -67,6 +68,9 @@ claudepod [options] [project-dir] [-- claude-args...]
 
 # Resume a specific previous session by its ID
 ./claudepod -r 01999c8a-b3f4-7c2d-9e8f-1a2b3c4d5e6f
+
+# Keep permission prompts (interactive — you're at the keyboard)
+./claudepod -i
 ```
 
 ## How it works
@@ -76,9 +80,9 @@ claudepod [options] [project-dir] [-- claude-args...]
 3. **Creates** `<project>/.claudepod/` for per-project Claude state (sessions, memory, plans, todos) and bind-mounts it onto Claude's per-cwd state path; appends `.claudepod/` to `.gitignore` if a `.gitignore` exists
 4. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
 5. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
-6. **Launches Claude Code** with `--dangerously-skip-permissions` (safe because the container *is* the sandbox). Starts a fresh Claude session by default — pass `-r <session-id>` to resume a specific previous session.
+6. **Launches Claude Code** with `--dangerously-skip-permissions` by default (safe because the container *is* the sandbox and unattended runs can't answer prompts). Starts a fresh session — pass `-r <session-id>` to resume a specific previous one, or `-i/--interactive` to keep Claude's normal permission prompts when you're present.
 
-> **Security note:** Claude Code runs with `--dangerously-skip-permissions` and has SSH access via your forwarded SSH agent. This means Claude can push to any repository your loaded SSH keys have access to. If this is a concern, remove keys from your agent or use a separate agent with a limited key set.
+> **Security note:** By default Claude Code runs with `--dangerously-skip-permissions` and has SSH access via your forwarded SSH agent. This means Claude can push to any repository your loaded SSH keys have access to. If this is a concern, run with `-i` so you can review actions, remove keys from your agent, or use a separate agent with a limited key set.
 
 ## Firewall allowlist
 

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Key Files
 
-- `claudepod` — Bash entrypoint script. Builds the container image (if needed), mounts the user's project at the same absolute path inside the container as on the host, optionally sets up the firewall, and launches Claude Code with `--dangerously-skip-permissions`.
+- `claudepod` — Bash entrypoint script. Builds the container image (if needed), mounts the user's project at the same absolute path inside the container as on the host, optionally sets up the firewall, and launches Claude Code (with `--dangerously-skip-permissions` by default, since the container is the sandbox and unattended runs can't answer permission prompts; pass `-i/--interactive` to keep prompts when you're at the keyboard).
 - `Dockerfile` — Debian trixie-slim based image with dev tools, Claude Code (native installer), mise (runtime version manager), and Ralph. Runs as non-root user `dev` with UID/GID passed as build args (defaults to 1000).
 - `init-firewall.sh` — iptables/ipset-based default-deny egress firewall. Allowlists specific domains (Anthropic API, GitHub, Bitbucket, npm, PyPI, Go proxy, crates.io, Hex.pm, documentation sites). DNS is locked to the container's configured resolver. SSH is restricted to GitHub and Bitbucket IPs only.
 - `README.md` — User-facing documentation with features, usage, and firewall allowlist summary.
@@ -37,6 +37,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Resume a specific previous Claude session by its ID
 ./claudepod -r 01999c8a-b3f4-7c2d-9e8f-1a2b3c4d5e6f
+
+# Keep Claude's permission prompts (you're at the keyboard)
+./claudepod -i
 
 # Pass extra args to claude
 ./claudepod -- --model opus
