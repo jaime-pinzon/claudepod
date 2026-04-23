@@ -180,6 +180,7 @@ ALLOWED_DOMAINS+=(
 # Resolve and add all allowed domains
 for domain in "${ALLOWED_DOMAINS[@]}"; do
   ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+  # shellcheck disable=SC2086 # intentional word-split: ips is whitespace-separated
   for ip in $ips; do
     ipset add allowed-domains "$ip" -exist
   done
@@ -189,6 +190,7 @@ done
 # These are also the only IPs allowed for SSH (git@github.com)
 GITHUB_META=$(curl -fsSL https://api.github.com/meta 2>/dev/null || true)
 if [ -n "$GITHUB_META" ]; then
+  # shellcheck disable=SC2046 # intentional word-split: jq prints CIDRs one per line
   for cidr in $(echo "$GITHUB_META" | jq -r '(.git // [])[] , (.web // [])[] , (.api // [])[]' 2>/dev/null | grep -v ':' || true); do
     ipset add allowed-domains "$cidr" -exist 2>/dev/null || true
     ipset add ssh-allowed "$cidr" -exist 2>/dev/null || true
@@ -198,6 +200,7 @@ fi
 # Resolve Bitbucket Cloud IPs (for git operations over HTTPS + SSH)
 BITBUCKET_META=$(curl -fsSL https://ip-ranges.atlassian.com/ 2>/dev/null || true)
 if [ -n "$BITBUCKET_META" ]; then
+  # shellcheck disable=SC2046 # intentional word-split: jq prints CIDRs one per line
   for cidr in $(echo "$BITBUCKET_META" | jq -r '.items[] | select(.product == "bitbucket") | .cidr' 2>/dev/null | grep -v ':' || true); do
     ipset add allowed-domains "$cidr" -exist 2>/dev/null || true
     ipset add ssh-allowed "$cidr" -exist 2>/dev/null || true
@@ -242,6 +245,7 @@ iptables -A OUTPUT -p tcp -m multiport --dports 80,443 -m set --match-set allowe
 # Restore any Podman/Docker internal DNS rules
 if [ -n "$CONTAINER_DNS_RULES" ]; then
   echo "$CONTAINER_DNS_RULES" | while IFS= read -r rule; do
+    # shellcheck disable=SC2086 # rule is an iptables argv string that must word-split
     iptables $rule 2>/dev/null || true
   done
 fi
