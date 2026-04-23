@@ -12,6 +12,9 @@ ARG MISE_VERSION=v2026.4.19
 ARG RALPH_REF=main
 
 # ── System packages ──────────────────────────────────────────────────
+# DL3008: apt version pinning across 17+ packages on Debian stable isn't
+# workable — the suite moves and `apt-get update` refetches on every rebuild.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -63,6 +66,10 @@ ENV DEVCONTAINER=true \
 WORKDIR /workspace
 USER $USERNAME
 
+# Propagate pipe failures through `curl | bash` installers below so a failed
+# curl doesn't silently leave a half-installed binary behind (fixes DL4006).
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # ── Claude Code ─────────────────────────────────────────────────────
 # install.sh accepts `stable`, `latest`, or an explicit X.Y.Z as $1.
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
@@ -73,11 +80,18 @@ RUN MISE_VERSION="$MISE_VERSION" curl -fsSL https://mise.run | bash \
     && mkdir -p /home/"$USERNAME"/.config/mise \
     && printf '[settings]\nauto_install = true\nidiomatic_version_file = true\n' \
         > /home/"$USERNAME"/.config/mise/config.toml
+# SC2016: the single quotes are intentional — we want the literal
+# `eval "$(mise activate bash)"` written to .bashrc, evaluated at shell
+# startup, not expanded now during image build.
+# hadolint ignore=SC2016
 RUN echo 'eval "$(mise activate bash)"' >> /home/"$USERNAME"/.bashrc \
     && mise use -g node@22.15.0 python@3.13.3
 
 # ── Ralph ───────────────────────────────────────────────────────────
 # Pin to a git ref so upstream main moving doesn't silently change the build.
+# DL3003: using WORKDIR here would split this into four layers and leak the
+# scratch directory into later instructions. `cd` inside one RUN is cleaner.
+# hadolint ignore=DL3003
 RUN git clone https://github.com/frankbria/ralph-claude-code.git /tmp/ralph \
     && cd /tmp/ralph && git checkout "$RALPH_REF" && bash install.sh \
     && rm -rf /tmp/ralph
