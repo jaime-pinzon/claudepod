@@ -3,6 +3,14 @@ FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# ── Version pins (override with --build-arg) ────────────────────────
+# Claude Code: "stable" | "latest" | "X.Y.Z" (parsed by claude.ai/install.sh)
+ARG CLAUDE_CODE_VERSION=stable
+# mise: must be a "v…"-prefixed release tag on jdx/mise
+ARG MISE_VERSION=v2026.4.19
+# Ralph: a git ref (branch, tag, or commit SHA) on frankbria/ralph-claude-code
+ARG RALPH_REF=main
+
 # ── System packages ──────────────────────────────────────────────────
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -56,10 +64,12 @@ WORKDIR /workspace
 USER $USERNAME
 
 # ── Claude Code ─────────────────────────────────────────────────────
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# install.sh accepts `stable`, `latest`, or an explicit X.Y.Z as $1.
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
 
 # ── Mise (runtime manager) + runtimes ───────────────────────────────
-RUN curl -fsSL https://mise.run | bash \
+# mise.run honours MISE_VERSION (must be "v…"-prefixed).
+RUN MISE_VERSION="$MISE_VERSION" curl -fsSL https://mise.run | bash \
     && mkdir -p /home/"$USERNAME"/.config/mise \
     && cat > /home/"$USERNAME"/.config/mise/config.toml <<'TOML'
 [settings]
@@ -70,8 +80,9 @@ RUN echo 'eval "$(mise activate bash)"' >> /home/"$USERNAME"/.bashrc \
     && mise use -g node@22.15.0 python@3.13.3
 
 # ── Ralph ───────────────────────────────────────────────────────────
-RUN git clone --depth 1 https://github.com/frankbria/ralph-claude-code.git /tmp/ralph \
-    && cd /tmp/ralph && bash install.sh \
+# Pin to a git ref so upstream main moving doesn't silently change the build.
+RUN git clone https://github.com/frankbria/ralph-claude-code.git /tmp/ralph \
+    && cd /tmp/ralph && git checkout "$RALPH_REF" && bash install.sh \
     && rm -rf /tmp/ralph
 
 CMD ["bash"]
