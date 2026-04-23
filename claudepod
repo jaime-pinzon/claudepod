@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# claudepod: Launch Claude Code in a sandboxed Podman container
-#
-# Usage:
-#   claudepod [options] [project-dir] [-- claude-args...]
-#
-# Options:
-#   -b, --build       Force rebuild the container image (clean, no layer cache)
-#   -n, --no-firewall Skip firewall setup (faster start, less secure)
-#   -p, --prompt TEXT  Pass a prompt directly (non-interactive, for background tasks)
-#   -s, --shell       Drop into a shell instead of launching Claude Code
-#   -r, --resume ID   Resume a specific Claude session by its session ID
-#   -i, --interactive Keep Claude's permission prompts (you're present to answer)
-#   -h, --help        Show this help
-#
-# Examples:
-#   claudepod                          # Current dir, interactive
-#   claudepod ~/projects/myapp         # Specific project
-#   claudepod -p "fix all lint errors" # Non-interactive task
-#   claudepod -- --model opus          # Pass args to claude
-# =============================================================================
+# claudepod: Launch Claude Code in a sandboxed Podman container.
+# Run `claudepod --help` for full usage.
+
+usage() {
+  cat <<'EOF'
+claudepod: Launch Claude Code in a sandboxed Podman container
+
+Usage:
+  claudepod [options] [project-dir] [-- claude-args...]
+
+Options:
+  -b, --build        Force rebuild the container image (clean, no layer cache)
+  -n, --no-firewall  Skip firewall setup (faster start, less secure)
+  -p, --prompt TEXT  Pass a prompt directly (non-interactive, for background tasks)
+  -s, --shell        Drop into a shell instead of launching Claude Code
+  -r, --resume ID    Resume a specific Claude session by its session ID
+  -i, --interactive  Keep Claude's permission prompts (you're present to answer)
+  -h, --help         Show this help
+
+Examples:
+  claudepod                          # Current dir, interactive
+  claudepod ~/projects/myapp         # Specific project
+  claudepod -p "fix all lint errors" # Non-interactive task
+  claudepod -- --model opus          # Pass args to claude
+EOF
+}
 
 IMAGE_NAME="claudepod"
 CONTAINER_PREFIX="claudepod"
@@ -78,7 +83,7 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   -h | --help)
-    head -23 "$0" | grep '^#' | sed 's/^# \?//'
+    usage
     exit 0
     ;;
   --)
