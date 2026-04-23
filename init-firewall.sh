@@ -11,6 +11,8 @@ set -euo pipefail
 #     blocking DNS tunneling to arbitrary servers.
 #   - SSH (port 22) is restricted to resolved GitHub and Bitbucket IPs only,
 #     blocking SSH exfiltration to attacker-controlled hosts.
+#   - IPv6 egress is default-deny in its entirety; the allowlist resolves
+#     only A records, so there would be no matching v6 allow rules anyway.
 #   - IP-based rules may go stale if DNS records rotate during long
 #     sessions. Restart the container to refresh.
 # =============================================================================
@@ -248,6 +250,29 @@ fi
 iptables -P OUTPUT DROP
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
+
+# ---- IPv6: default-deny the whole address family ----
+# The allowlist above is resolved via A records only, so IPv6 has no
+# matching allow rules. If the container's network has v6 connectivity,
+# unrestricted v6 egress would silently bypass the v4 allowlist. Apply the
+# same default-deny policy over ip6tables, leaving only loopback and
+# established connections open. Each command is guarded with `|| true` so
+# missing kernel support or ip6tables doesn't trip `set -e`.
+if command -v ip6tables >/dev/null 2>&1; then
+  ip6tables -F OUTPUT 2>/dev/null || true
+  ip6tables -F INPUT 2>/dev/null || true
+  ip6tables -F FORWARD 2>/dev/null || true
+  ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+  ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+  ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+  ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+  ip6tables -P OUTPUT DROP 2>/dev/null || true
+  ip6tables -P INPUT DROP 2>/dev/null || true
+  ip6tables -P FORWARD DROP 2>/dev/null || true
+  echo "[firewall] IPv6 egress: default-deny (allowlist is IPv4-only)."
+else
+  echo "[firewall] WARNING: ip6tables unavailable — IPv6 egress is NOT restricted." >&2
+fi
 
 echo "[firewall] Network restrictions active."
 echo "[firewall] SSH restricted to GitHub and Bitbucket IPs only."
