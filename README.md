@@ -22,7 +22,7 @@ Run [Claude Code](https://claude.ai/code) inside a sandboxed Podman container wi
 
 ```bash
 # Clone and run against the current directory
-git clone https://github.com/youruser/claudepod.git
+git clone https://github.com/jaime-pinzon/claudepod.git
 cd claudepod
 ./claudepod ~/projects/myapp
 ```
@@ -97,4 +97,4 @@ All other outbound traffic is dropped. See [`init-firewall.sh`](init-firewall.sh
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
