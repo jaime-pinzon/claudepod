@@ -71,11 +71,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
 # mise.run honours MISE_VERSION (must be "v…"-prefixed).
 RUN MISE_VERSION="$MISE_VERSION" curl -fsSL https://mise.run | bash \
     && mkdir -p /home/"$USERNAME"/.config/mise \
-    && cat > /home/"$USERNAME"/.config/mise/config.toml <<'TOML'
-[settings]
-auto_install = true
-idiomatic_version_file = true
-TOML
+    && printf '[settings]\nauto_install = true\nidiomatic_version_file = true\n' \
+        > /home/"$USERNAME"/.config/mise/config.toml
 RUN echo 'eval "$(mise activate bash)"' >> /home/"$USERNAME"/.bashrc \
     && mise use -g node@22.15.0 python@3.13.3
 
