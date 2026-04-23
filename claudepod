@@ -138,16 +138,16 @@ image_exists() {
 }
 
 if $FORCE_BUILD || ! image_exists; then
-  echo "[build] Building $IMAGE_NAME image..."
+  echo "[build]    Building $IMAGE_NAME image..."
   podman build --format docker \
     --no-cache \
     --build-arg USER_UID="$(id -u)" \
     --build-arg USER_GID="$(id -g)" \
     -t "$IMAGE_NAME" \
     "$SCRIPT_DIR"
-  echo "[build] Done."
+  echo "[build]    Done."
 else
-  echo "[build] Image $IMAGE_NAME exists. Use -b to rebuild."
+  echo "[build]    Image $IMAGE_NAME exists. Use -b to rebuild."
 fi
 
 # ----- Ensure home volume matches current image -----
@@ -156,14 +156,22 @@ CURRENT_IMAGE_ID=$(podman image inspect --format '{{.Id}}' "$IMAGE_NAME" 2>/dev/
 if podman volume exists "$VOLUME_NAME" 2>/dev/null; then
   STORED_IMAGE_ID=$(podman volume inspect --format '{{index .Labels "image-id"}}' "$VOLUME_NAME" 2>/dev/null || echo "")
   if [ "$STORED_IMAGE_ID" != "$CURRENT_IMAGE_ID" ]; then
-    echo "[volume] Image changed — removing stale home volume... $VOLUME_NAME"
-    podman volume rm "$VOLUME_NAME" 2>/dev/null
+    echo "[volume]   Image changed — removing stale home volume... $VOLUME_NAME"
+    # --force: stops dependent containers (e.g., zombies from a prior crashed
+    # run) before removing the volume. Use || true so a rm failure doesn't
+    # trip set -e and silently kill the launcher.
+    if ! podman volume rm --force "$VOLUME_NAME" >/dev/null 2>&1; then
+      echo "[volume]   Warning: failed to remove $VOLUME_NAME (in use by another container?). Continuing with the existing volume." >&2
+    fi
   fi
 fi
 
 if ! podman volume exists "$VOLUME_NAME" 2>/dev/null; then
-  echo "[volume] Creating home volume for current image... $VOLUME_NAME"
-  podman volume create --label "image-id=$CURRENT_IMAGE_ID" "$VOLUME_NAME" 2>/dev/null
+  echo "[volume]   Creating home volume for current image... $VOLUME_NAME"
+  if ! podman volume create --label "image-id=$CURRENT_IMAGE_ID" "$VOLUME_NAME" >/dev/null 2>&1; then
+    echo "Error: failed to create volume $VOLUME_NAME" >&2
+    exit 1
+  fi
 fi
 
 # ----- Ensure per-project state dir exists and is gitignored -----
@@ -254,7 +262,7 @@ HAS_VERSION_FILE=false
 for vf in "${VERSION_FILES[@]}"; do
   if [ -f "$PROJECT_DIR/$vf" ]; then
     HAS_VERSION_FILE=true
-    echo "[mise] Detected $vf — runtimes will be installed at startup."
+    echo "[mise]     Detected $vf — runtimes will be installed at startup."
     break
   fi
 done
@@ -331,9 +339,9 @@ fi
 
 # ----- Launch -----
 if $SHELL_ONLY; then
-  echo "[run] Starting sandboxed shell..."
+  echo "[run]      Starting sandboxed shell..."
 else
-  echo "[run] Starting sandboxed Claude Code..."
+  echo "[run]      Starting sandboxed Claude Code..."
 fi
 
 podman run \
@@ -345,4 +353,4 @@ podman run \
 echo "."
 echo ".."
 echo "..."
-echo "[done] Container destroyed. Your project files in $PROJECT_DIR are intact."
+echo "[done]     Container destroyed. Your project files in $PROJECT_DIR are intact."
