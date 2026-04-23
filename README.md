@@ -67,11 +67,11 @@ claudepod [options] [project-dir] [-- claude-args...]
 
 1. **Builds** a Debian trixie-slim container with dev tools, Claude Code, and mise
 2. **Mounts** your project directory into `/workspace` (read-write)
-3. **Mounts** `~/.ssh` and `~/.gitconfig` read-only for git operations
+3. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
 4. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
 5. **Launches Claude Code** with `--dangerously-skip-permissions` (safe because the container *is* the sandbox)
 
-> **Security note:** Claude Code runs with `--dangerously-skip-permissions` and has SSH access to GitHub/Bitbucket via your mounted `~/.ssh`. This means Claude can push to any repository your SSH key has access to. If this is a concern, use a deploy key with limited repo scope or mount only specific keys.
+> **Security note:** Claude Code runs with `--dangerously-skip-permissions` and has SSH access via your forwarded SSH agent. This means Claude can push to any repository your loaded SSH keys have access to. If this is a concern, remove keys from your agent or use a separate agent with a limited key set.
 
 ## Firewall allowlist
 

@@ -133,6 +133,14 @@ if ! podman volume exists "$VOLUME_NAME" 2>/dev/null; then
   podman volume create --label "image-id=$CURRENT_IMAGE_ID" "$VOLUME_NAME" 2>/dev/null
 fi
 
+# ----- Construct run arguments -----
+RUN_ARGS=(
+  "--rm"
+  "--name" "$CONTAINER_NAME"
+  "-it"
+  "--userns=keep-id"
+)
+
 # ----- Construct mount arguments -----
 MOUNTS=(
   # Project workspace (read-write, this is what Claude edits)
@@ -143,9 +151,29 @@ MOUNTS=(
   "-v" "${VOLUME_NAME}:${CONTAINER_HOME}:Z"
 )
 
-# Mount SSH keys read-only (for git push/pull)
-if [ -d "$HOME/.ssh" ]; then
-  MOUNTS+=("-v" "${HOME}/.ssh:${CONTAINER_HOME}/.ssh:ro,Z")
+# Forward the host's SSH agent instead of mounting private keys. Private keys
+# never enter the container; git relies entirely on the forwarded agent. We
+# still bind-mount the SSH config, known_hosts, and public keys read-only so
+# host-side Host/IdentityFile/proxy settings apply inside the container.
+if [ -n "${SSH_AUTH_SOCK:-}" ]; then
+  MOUNTS+=("-v" "${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock:Z")
+  RUN_ARGS+=("-e" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
+  echo "[mount] SSH agent socket"
+
+  if [ -f "$HOME/.ssh/config" ]; then
+    MOUNTS+=("-v" "${HOME}/.ssh/config:${CONTAINER_HOME}/.ssh/config:ro,Z")
+    echo "[mount] ~/.ssh/config (read-only)"
+  fi
+  if [ -f "$HOME/.ssh/known_hosts" ]; then
+    MOUNTS+=("-v" "${HOME}/.ssh/known_hosts:${CONTAINER_HOME}/.ssh/known_hosts:ro,Z")
+    echo "[mount] ~/.ssh/known_hosts (read-only)"
+  fi
+  for pubkey in "$HOME"/.ssh/*.pub; do
+    if [ -f "$pubkey" ]; then
+      MOUNTS+=("-v" "${pubkey}:${CONTAINER_HOME}/.ssh/$(basename "$pubkey"):ro,Z")
+      echo "[mount] ~/.ssh/$(basename "$pubkey") (read-only)"
+    fi
+  done
 fi
 
 # Mount gitconfig read-only
@@ -153,13 +181,14 @@ if [ -f "$HOME/.gitconfig" ]; then
   MOUNTS+=("-v" "${HOME}/.gitconfig:${CONTAINER_HOME}/.gitconfig:ro,Z")
 fi
 
-# ----- Construct run arguments -----
-RUN_ARGS=(
-  "--rm"
-  "--name" "$CONTAINER_NAME"
-  "-it"
-  "--userns=keep-id"
-)
+# Mount gh CLI config read-only so `gh` works inside the container without a
+# separate login. Note: ~/.config/gh/hosts.yml contains OAuth tokens; this
+# accepts the same trust trade-off as mounting SSH public keys — the token
+# bytes are reachable by anything in the container. Prefer `GH_TOKEN=...` in
+# the environment if you want the token out of the mount surface.
+if [ -d "$HOME/.config/gh" ]; then
+  MOUNTS+=("-v" "${HOME}/.config/gh:${CONTAINER_HOME}/.config/gh:ro,Z")
+fi
 
 # Firewall requires NET_ADMIN + NET_RAW capabilities
 if $USE_FIREWALL; then

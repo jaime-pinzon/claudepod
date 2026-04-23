@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture Notes
 
 - The container uses `podman run --userns=keep-id` to map the host user's UID/GID into the container, so file ownership in mounted project dirs is preserved. The Dockerfile accepts `USER_UID` and `USER_GID` as build args, set automatically by `claudepod` to match the host user.
-- Host `~/.ssh` and `~/.gitconfig` are mounted read-only into the container for git operations.
+- Host `~/.gitconfig` is mounted read-only. For SSH, the host's `SSH_AUTH_SOCK` is forwarded into the container along with read-only mounts of `~/.ssh/config`, `~/.ssh/known_hosts`, and public keys; private keys are never mounted — git relies entirely on the forwarded agent.
 - A named volume `claudepod-home` persists the container user's home directory (Claude config, shell history, etc.) across sessions. The volume is automatically removed on image rebuild so it gets re-populated from the fresh image.
 - The firewall requires `NET_ADMIN` and `NET_RAW` capabilities and runs via a sudoers rule limited to the firewall script only.
 - The firewall resolves domain allowlist entries to IPs at container start using `dig`, fetches GitHub's IP ranges from `api.github.com/meta`, and fetches Bitbucket's IP ranges from `ip-ranges.atlassian.com` for SSH restrictions.
