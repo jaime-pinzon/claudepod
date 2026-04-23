@@ -87,12 +87,21 @@ PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
 
+# Refuse paths that would collide with the container user's home (which is a
+# named volume mount). A project under /home/dev/ would have its same-path
+# mount shadow or be shadowed by the home volume.
+if [[ "$PROJECT_DIR" == "$CONTAINER_HOME" || "$PROJECT_DIR" == "$CONTAINER_HOME"/* ]]; then
+  echo "Error: project path $PROJECT_DIR collides with the container user's home ($CONTAINER_HOME)." >&2
+  echo "Move the project elsewhere on the host." >&2
+  exit 1
+fi
+
 # Sanitize project name for container naming (alphanumeric, hyphens, underscores only)
 SAFE_PROJECT_NAME="$(echo "$PROJECT_NAME" | tr -cd '[:alnum:]-_')"
 CONTAINER_NAME="${CONTAINER_PREFIX}-${SAFE_PROJECT_NAME:-project}-$$"
 
 echo "=== Claude Sandbox ==="
-echo "  Project:   $PROJECT_DIR"
+echo "  Project:   $PROJECT_DIR (mounted at same path inside container)"
 echo "  Container: $CONTAINER_NAME"
 echo "  Firewall:  $USE_FIREWALL"
 echo ""
@@ -139,12 +148,15 @@ RUN_ARGS=(
   "--name" "$CONTAINER_NAME"
   "-it"
   "--userns=keep-id"
+  "--workdir" "$PROJECT_DIR"
 )
 
 # ----- Construct mount arguments -----
 MOUNTS=(
-  # Project workspace (read-write, this is what Claude edits)
-  "-v" "${PROJECT_DIR}:/workspace:Z"
+  # Project mounted at the same absolute path as on the host. This avoids
+  # path-translation issues with anything git records as an absolute path
+  # (worktree pointers, submodules, core.worktree, etc.).
+  "-v" "${PROJECT_DIR}:${PROJECT_DIR}:Z"
 
   # Persist the entire container home directory across sessions
   # Covers ~/.claude.json, ~/.claude/, ~/.bashrc modifications, shell history, etc.
@@ -221,9 +233,9 @@ if $USE_FIREWALL; then
   ENTRYPOINT_SCRIPT+="sudo /usr/local/bin/init-firewall.sh && "
 fi
 
-# Install mise runtimes if version file detected
+# Install mise runtimes if version file detected (cwd is set via --workdir)
 if $HAS_VERSION_FILE; then
-  ENTRYPOINT_SCRIPT+="cd /workspace && mise install && "
+  ENTRYPOINT_SCRIPT+="mise install && "
 fi
 
 if $SHELL_ONLY; then

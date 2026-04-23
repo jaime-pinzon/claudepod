@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Key Files
 
-- `claudepod` — Bash entrypoint script. Builds the container image (if needed), mounts the user's project into `/workspace`, optionally sets up the firewall, and launches Claude Code with `--dangerously-skip-permissions`.
+- `claudepod` — Bash entrypoint script. Builds the container image (if needed), mounts the user's project at the same absolute path inside the container as on the host, optionally sets up the firewall, and launches Claude Code with `--dangerously-skip-permissions`.
 - `Dockerfile` — Debian trixie-slim based image with dev tools, Claude Code (native installer), mise (runtime version manager), and Ralph. Runs as non-root user `dev` with UID/GID passed as build args (defaults to 1000).
 - `init-firewall.sh` — iptables/ipset-based default-deny egress firewall. Allowlists specific domains (Anthropic API, GitHub, Bitbucket, npm, PyPI, Go proxy, crates.io, Hex.pm, documentation sites). DNS is locked to the container's configured resolver. SSH is restricted to GitHub and Bitbucket IPs only.
 - `README.md` — User-facing documentation with features, usage, and firewall allowlist summary.
@@ -42,6 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture Notes
 
 - The container uses `podman run --userns=keep-id` to map the host user's UID/GID into the container, so file ownership in mounted project dirs is preserved. The Dockerfile accepts `USER_UID` and `USER_GID` as build args, set automatically by `claudepod` to match the host user.
+- The project is mounted at its **real host absolute path** inside the container (e.g., `/home/jaime/projects/foo` on the host is `/home/jaime/projects/foo` in the container) and `--workdir` is set to that same path. This avoids translation issues with anything git records as an absolute path: git worktree pointers, submodules, and `core.worktree` resolve identically on both sides. The `/workspace` directory still exists in the image but is no longer the project mount target. Project paths under `/home/dev/` are refused at launch because they would collide with the container user's home volume.
 - Host `~/.gitconfig` is mounted read-only. For SSH, the host's `SSH_AUTH_SOCK` is forwarded into the container along with read-only mounts of `~/.ssh/config`, `~/.ssh/known_hosts`, and public keys; private keys are never mounted — git relies entirely on the forwarded agent.
 - A named volume `claudepod-home` persists the container user's home directory (Claude config, shell history, etc.) across sessions. The volume is automatically removed on image rebuild so it gets re-populated from the fresh image.
 - The firewall requires `NET_ADMIN` and `NET_RAW` capabilities and runs via a sudoers rule limited to the firewall script only.

@@ -8,6 +8,7 @@ Run [Claude Code](https://claude.ai/code) inside a sandboxed Podman container wi
 - **SSH restricted to GitHub/Bitbucket IPs only** — blocks SSH exfiltration to arbitrary hosts
 - **DNS pinned to container resolver** — prevents DNS tunneling
 - **File ownership preserved** — uses `podman --userns=keep-id` so mounted files keep your host UID/GID
+- **Same-path mounting** — your project sits at the same absolute path inside the container as on the host, so git worktrees, submodules, and other absolute-path config survive crossing the boundary
 - **Persistent home directory** — Claude config, shell history, and installed tools survive across sessions
 - **Runtime version management** — [mise](https://mise.jdx.dev/) is pre-installed; detects `.tool-versions`, `mise.toml`, etc. and installs runtimes automatically
 
@@ -66,7 +67,7 @@ claudepod [options] [project-dir] [-- claude-args...]
 ## How it works
 
 1. **Builds** a Debian trixie-slim container with dev tools, Claude Code, and mise
-2. **Mounts** your project directory into `/workspace` (read-write)
+2. **Mounts** your project directory at the same absolute path inside the container as on the host (read-write), so absolute paths in git config resolve identically on both sides
 3. **Forwards** your SSH agent socket and mounts `~/.gitconfig` plus your SSH config / known_hosts / public keys read-only for git operations (private keys are never mounted)
 4. **Starts the firewall** (unless `-n`): resolves allowlisted domains to IPs, sets iptables default-deny, and restricts DNS and SSH
 5. **Launches Claude Code** with `--dangerously-skip-permissions` (safe because the container *is* the sandbox)
