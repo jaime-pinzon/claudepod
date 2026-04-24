@@ -30,6 +30,7 @@ RUN apt-get update \
         iptables \
         ipset \
         jq \
+        neovim \
         openssh-client \
         procps \
         python3 \
@@ -61,6 +62,8 @@ COPY --chmod=755 nosusp.py /usr/local/bin/nosusp
 # ── Environment ─────────────────────────────────────────────────────
 ENV DEVCONTAINER=true \
     SHELL=/bin/bash \
+    EDITOR=nvim \
+    VISUAL=nvim \
     PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.local/share/mise/shims:/home/${USERNAME}/.claude/bin:${PATH}"
 
 WORKDIR /workspace
